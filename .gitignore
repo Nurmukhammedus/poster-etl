@@ -1,0 +1,19 @@
+# Secrets — никогда не коммитить
+.env
+service_account.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE / OS
+.vscode/
+.DS_Store
+*.local.json
+
+# Project specific
+graphify-out/
+.claude/
