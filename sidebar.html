@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Google Sans", Arial, sans-serif;
+      font-size: 13px;
+      color: #202124;
+      padding: 16px;
+      background: #fff;
+    }
+
+    /* ── Заголовок ── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid #1a73e8;
+    }
+    .header h2 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #1a73e8;
+    }
+
+    /* ── Секция ── */
+    .section {
+      margin-bottom: 16px;
+    }
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: #5f6368;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    /* ── Radio ── */
+    .radio-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 12px;
+      border: 1px solid #dadce0;
+      border-radius: 8px;
+      margin-bottom: 6px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .radio-card:hover { border-color: #1a73e8; background: #f8f9ff; }
+    .radio-card.selected { border-color: #1a73e8; background: #e8f0fe; }
+    .radio-card input { margin-top: 2px; accent-color: #1a73e8; }
+    .radio-card .card-title { font-weight: 600; font-size: 13px; }
+    .radio-card .card-desc  { font-size: 11px; color: #5f6368; margin-top: 2px; }
+
+    /* ── Даты ── */
+    .date-row {
+      display: flex;
+      gap: 8px;
+    }
+    .date-field {
+      flex: 1;
+    }
+    .date-field label {
+      display: block;
+      font-size: 11px;
+      color: #5f6368;
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
+    .date-field input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #202124;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .date-field input:focus { border-color: #1a73e8; }
+
+    .hint {
+      font-size: 11px;
+      color: #80868b;
+      margin-top: 6px;
+      line-height: 1.5;
+    }
+
+    /* ── Кнопка ── */
+    .btn-run {
+      width: 100%;
+      padding: 11px;
+      background: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+      margin-top: 4px;
+    }
+    .btn-run:hover    { background: #1557b0; }
+    .btn-run:disabled { background: #dadce0; color: #80868b; cursor: not-allowed; }
+
+    /* ── Статус ── */
+    #status {
+      display: none;
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .status-running { background: #fef7e0; color: #7a5c00; border: 1px solid #f9c53b; }
+    .status-ok      { background: #e6f4ea; color: #137333; border: 1px solid #34a853; }
+    .status-error   { background: #fce8e6; color: #c5221f; border: 1px solid #ea4335; }
+
+    /* ── Лог ── */
+    .log-link {
+      display: block;
+      text-align: center;
+      font-size: 11px;
+      color: #1a73e8;
+      margin-top: 12px;
+      text-decoration: none;
+    }
+    .log-link:hover { text-decoration: underline; }
+
+    hr { border: none; border-top: 1px solid #f1f3f4; margin: 16px 0; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <span style="font-size:20px">🚀</span>
+    <h2>Poster ETL</h2>
+  </div>
+
+  <!-- Тип синхронизации -->
+  <div class="section">
+    <div class="section-title">Тип синхронизации</div>
+
+    <label class="radio-card selected" id="card-full">
+      <input type="radio" name="sync" value="full" checked onchange="updateCards()">
+      <div>
+        <div class="card-title">Full</div>
+        <div class="card-desc">Меню, тех.карты, сотрудники + чеки, склад, финансы</div>
+      </div>
+    </label>
+
+    <label class="radio-card" id="card-inc">
+      <input type="radio" name="sync" value="incremental" onchange="updateCards()">
+      <div>
+        <div class="card-title">Incremental</div>
+        <div class="card-desc">Только чеки, склад, финансовые операции</div>
+      </div>
+    </label>
+  </div>
+
+  <!-- Период -->
+  <div class="section">
+    <div class="section-title">Период загрузки</div>
+    <div class="date-row">
+      <div class="date-field">
+        <label>Дата от</label>
+        <input type="date" id="date_from">
+      </div>
+      <div class="date-field">
+        <label>Дата до</label>
+        <input type="date" id="date_to">
+      </div>
+    </div>
+    <p class="hint">Справочники (меню, клиенты) не зависят от дат — всегда актуальные.</p>
+  </div>
+
+  <hr>
+
+  <button class="btn-run" id="btn" onclick="runETL()">▶ Запустить загрузку</button>
+
+  <div id="status"></div>
+
+  <a class="log-link" href="#" onclick="openLogs()">📋 История запусков</a>
+
+<script>
+  // ── Заполняем даты по умолчанию ──
+  google.script.run
+    .withSuccessHandler(function(dates) {
+      document.getElementById('date_from').value = dates.monthAgo;
+      document.getElementById('date_to').value   = dates.today;
+    })
+    .getDefaultDates();
+
+  // ── Подсветка выбранной карточки ──
+  function updateCards() {
+    const val = document.querySelector('input[name="sync"]:checked').value;
+    document.getElementById('card-full').classList.toggle('selected', val === 'full');
+    document.getElementById('card-inc').classList.toggle('selected',  val === 'incremental');
+  }
+
+  // ── Запуск ETL ──
+  function runETL() {
+    const syncType = document.querySelector('input[name="sync"]:checked').value;
+    const dateFrom = document.getElementById('date_from').value;
+    const dateTo   = document.getElementById('date_to').value;
+
+    if (!dateFrom || !dateTo) {
+      showStatus('⚠️ Укажи обе даты.', 'error');
+      return;
+    }
+    if (dateFrom > dateTo) {
+      showStatus('⚠️ Дата «от» не может быть позже даты «до».', 'error');
+      return;
+    }
+
+    const typeLabel = syncType === 'full' ? 'Full' : 'Incremental';
+    showStatus(`⏳ Запускаем ${typeLabel} sync...<br>Не закрывай панель.`, 'running');
+    document.getElementById('btn').disabled = true;
+
+    google.script.run
+      .withSuccessHandler(onSuccess)
+      .withFailureHandler(onError)
+      .triggerETL(syncType, dateFrom, dateTo);
+  }
+
+  function onSuccess(result) {
+    document.getElementById('btn').disabled = false;
+    if (result.status === 'started' || result.status === 'ok') {
+      const typeLabel = result.sync_type === 'full' ? 'Full' : 'Incremental';
+      showStatus(
+        `✅ <b>${typeLabel} sync запущен!</b><br>` +
+        `📅 ${result.date_from} → ${result.date_to}<br><br>` +
+        `⏳ Данные появятся в BigQuery через <b>2–10 минут</b>.`,
+        'ok'
+      );
+    } else {
+      showStatus('❌ ' + (result.message || JSON.stringify(result)), 'error');
+    }
+  }
+
+  function onError(err) {
+    document.getElementById('btn').disabled = false;
+    showStatus('❌ ' + err.message, 'error');
+  }
+
+  function showStatus(msg, type) {
+    const el = document.getElementById('status');
+    el.innerHTML     = msg;
+    el.className     = 'status-' + type;
+    el.style.display = 'block';
+  }
+
+  function openLogs() {
+    google.script.run.openLogsSheet();
+  }
+</script>
+</body>
+</html>

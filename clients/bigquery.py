@@ -12,11 +12,21 @@ BigQuery client.
 import logging
 import os
 import re
+import time
 
-from google.api_core.exceptions import Conflict
+from google.api_core.exceptions import Conflict, ServiceUnavailable, InternalServerError
 from google.cloud import bigquery
+from requests.exceptions import ConnectionError as RequestsConnectionError
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+# Transient-ошибки сети/BigQuery, которые безопасно повторить
+_RETRYABLE_EXC = (
+    RequestsConnectionError,
+    ConnectionResetError,
+    ServiceUnavailable,
+    InternalServerError,
+)
 
 from config import BQ_DATASET, BQ_PROJECT, GOOGLE_APPLICATION_CREDENTIALS
 
@@ -40,19 +50,43 @@ class BigQueryClient:
         """Получаем схему прямо из BigQuery — никакой авто-детекции типов."""
         return self.client.get_table(self._table_ref(table_name)).schema
 
-    def _load(self, rows: list[dict], destination: str, schema) -> None:
-        """Базовый load job — используется и write_table и write_partition."""
+    def _load(self, rows: list[dict], destination: str, schema, max_retries: int = 4) -> None:
+        """
+        Базовый load job — используется и write_table, и write_partition.
+
+        Retry-стратегия:
+          * Conflict (409) — игнорируем (дубль job)
+          * транзиентные сетевые ошибки / 5xx — exponential backoff до max_retries
+          * остальные ошибки — прокидываем вверх
+        """
         job_config = bigquery.LoadJobConfig(
             write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
             source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
             schema=schema,
         )
-        try:
-            job = self.client.load_table_from_json(rows, destination, job_config=job_config)
-            job.result()
-        except Conflict:
-            # 409: job уже был отправлен (retry после успешного запроса) — игнорируем
-            logger.warning("BQ job conflict (409) for %s — already submitted, skipping", destination)
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                job = self.client.load_table_from_json(rows, destination, job_config=job_config)
+                job.result(timeout=300)   # 5 минут — иначе бросит TimeoutError
+                return
+            except Conflict:
+                # 409: job уже был отправлен (retry после успешного запроса) — игнорируем
+                logger.warning("BQ job conflict (409) for %s — already submitted, skipping", destination)
+                return
+            except _RETRYABLE_EXC as e:
+                if attempt == max_retries:
+                    logger.error(
+                        "BQ load failed for %s after %d attempts: %s",
+                        destination, attempt, e,
+                    )
+                    raise
+                delay = 2 ** attempt   # 2s, 4s, 8s, 16s
+                logger.warning(
+                    "BQ load transient error for %s (attempt %d/%d): %s — retrying in %ds",
+                    destination, attempt, max_retries, e, delay,
+                )
+                time.sleep(delay)
 
     # ── Public ────────────────────────────────────────────────────────────────
 
