@@ -228,22 +228,36 @@ class PosterClient:
         status, processing_status, service_mode, table_name, client_*,
         transaction_comment, tax_sum, payment_method_id, payed_ewallet.
 
-        Отличия от прочих эндпоинтов:
-          * параметры даты — dateFrom/dateTo в формате Ymd (без дефисов)
-          * пагинация курсорная: через next_tr (ID последнего чека страницы)
-          * ответ: {"response": [...]} — плоский массив, без count/data
+        Пагинация:
+          * after_date_close / before_date_close — Unix timestamp границы периода.
+            Эти параметры работают корректно при cursor-пагинации через next_tr,
+            в отличие от dateFrom/dateTo которые игнорируются на 2+ страницах.
+          * next_tr — курсор (ID последнего чека страницы).
+          * Останавливаемся когда API вернул пустой список ИЛИ все чеки
+            страницы вышли за пределы периода (дополнительная страховка).
 
         ВАЖНО: include_products=true НЕ передаём — products мы берём из
         transactions.getTransactions (там полнее поля).
         """
-        endpoint  = "dash.getTransactions"
-        date_from = date_from.replace("-", "")
-        date_to   = date_to.replace("-", "")
+        import calendar
 
-        base_params = {
-            "dateFrom": date_from,
-            "dateTo":   date_to,
-            "status":   0,   # все заказы (открытые + закрытые + удалённые)
+        endpoint = "dash.getTransactions"
+
+        # Конвертируем 'YYYY-MM-DD' → Unix timestamp (сек)
+        # after_date_close  = начало дня date_from (00:00:00)
+        # before_date_close = конец дня date_to   (23:59:59)
+        from datetime import datetime, timezone
+        dt_from = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        dt_to   = datetime.strptime(date_to,   "%Y-%m-%d").replace(
+            hour=23, minute=59, second=59, tzinfo=timezone.utc
+        )
+        ts_from = int(dt_from.timestamp())
+        ts_to   = int(dt_to.timestamp())
+
+        base_params: dict = {
+            "after_date_close":  ts_from,
+            "before_date_close": ts_to,
+            "status":            0,   # все заказы (открытые + закрытые + удалённые)
         }
 
         all_rows: list[dict] = []
@@ -263,16 +277,24 @@ class PosterClient:
             if not isinstance(rows, list) or not rows:
                 break
 
-            all_rows.extend(rows)
+            # Страховка: фильтруем строки вне нашего диапазона
+            # (date_close приходит в мс, переводим в сек для сравнения)
+            in_range = [
+                r for r in rows
+                if ts_from <= int(r.get("date_close") or 0) // 1000 <= ts_to
+            ]
+            all_rows.extend(in_range)
 
-            last_id = str(rows[-1].get("transaction_id", "") or "")
+            last_id      = str(rows[-1].get("transaction_id", "") or "")
+            last_ts      = int(rows[-1].get("date_close") or 0) // 1000
+
             logger.info(
-                "dash.getTransactions: page %d — %d rows (last_id=%s)",
-                page_num, len(rows), last_id,
+                "dash.getTransactions: page %d — %d rows, %d in range (last_id=%s)",
+                page_num, len(rows), len(in_range), last_id,
             )
 
-            if not last_id or last_id == prev_last_id:
-                # API начал возвращать тот же хвост → страховка от бесконечного цикла
+            # Остановка: курсор зашёл дальше диапазона или дошли до конца
+            if not last_id or last_id == prev_last_id or last_ts < ts_from:
                 break
 
             prev_last_id = last_id
